@@ -1,9 +1,8 @@
-function Get-SPPageViews
+function Get-zSPPageViews
 {
-  <#
+    <#
     Usage: Get-SPPageViews -RootSiteUrl "http://hej.lab.roblab.com" -OutputFilepath "F:\pspageviews_$(Get-date -Format "yyyyMMddHHmm").csv" -IncludeSites -IncludeWebs -DeleteExistingFile
     #>
-
 	[CmdletBinding(
 		RemotingCapability = "PowerShell",
 		HelpUri = "",
@@ -49,7 +48,7 @@ function Get-SPPageViews
 		# Write header row to file
 		if(!$SuppressHeader.IsPresent)
 		{
-			$OutputHeader = "Web App,Site Collection,Scope,Name,URL,Most Recent Day with Usage,Hits - All Time,Unique Users - All Time,Hits - Most recent Day with Usage,Unique Users - Most recent day with Usage,Current Date,Monthly Hits,Daily Hits,Month,Day"
+			$OutputHeader = "Web App,Site Collection,Scope,Name,URL,Most Recent Day with Usage,Hits - All Time,Unique Users - All Time,Hits - Most recent Day with Usage,Unique Users - Most recent day with Usage,Current Date,Monthly Hits,Daily Hits,Month,Day,Size (GB)"
 			$OutputHeader | Out-File $OutputFilepath -Append
 		}
 
@@ -65,13 +64,37 @@ function Get-SPPageViews
 			$WebApp = $RootSite.WebApplication
 		}
 
-		# Get Search Service Application
-		$SearchApp = Get-SPEnterpriseSearchServiceApplication
-		if(!$SearchApp)
-		{
-			$abort = $true
-			Write-Host "Cannot find SSA!" -ForegroundColor Red -BackgroundColor White
-		}
+        #$webApplications = Get-SPWebApplication
+
+		# Get Search Service Applications
+		$inFarm = $null
+        $ssaEndPoint =  ([System.web.httputility]::UrlDecode((Get-SPServiceApplicationProxy | ?{ $_.TypeName -like "Search*" } | select ServiceEndpointUri).ServiceEndpointUri.absoluteuri)).Split("=")[2].split("/")[2].split(":")[0]
+        if(Get-SPServer | ?{ $_.Address -eq $ssaEndPoint })
+        {
+            Write-Verbose "In farm"
+            $inFarm = $true
+            $SearchApp = Get-SPEnterpriseSearchServiceApplication # assumes only one SSA
+	        if(!$SearchApp)
+	        {
+		        $abort = $true
+		        Write-Host "Cannot find SSA!" -ForegroundColor Red -BackgroundColor White
+	        }
+        }
+        else
+        {
+            Write-Verbose "Not in farm"
+            $inFarm = $false
+            $Session = New-PSSession -ComputerName $ssaEndPoint
+            if(!$Session)
+	        {
+		        $abort = $true
+		        Write-Host "Cannot connect to remote SSA endpoint!" -ForegroundColor Red -BackgroundColor White
+	        }
+            else
+            {
+                Invoke-Command -Session $Session -ScriptBlock { if((Get-PSSnapin "Microsoft.SharePoint.PowerShell" -ErrorAction SilentlyContinue) -eq $null){ Add-PSSnapin "Microsoft.SharePoint.PowerShell" } }
+            }
+        }
 	}
 
 	process
@@ -97,9 +120,11 @@ function Get-SPPageViews
 				$LastProcessingUniqueUsers = $Usage.LastProcessingUniqueUsers
 				try{ $HitCountforMonth = $UsageData.GetHitCountforMonth($tDate) } catch{ $HitCountforMonth = "N/A" }
 				try{ $HitCountforDay = $UsageData.GetHitCountforDay($tDate) } catch{ $HitCountforDay = "N/A" }
+                
+                $size = [math]::Round($site.Usage.Storage/1GB,4)
 
 				# Write data to file
-				$OutputString = "$($WebApp.Name),$($SiteColTitle),$($Scope),$($SiteTitle),$($SiteUrl),$($LastProcessingTime),$($TotalHits),$($TotalUniqueUsers),$($LastProcessingHits),$($LastProcessingUniqueUsers),$($CurrentDate),$($HitCountforMonth),$($HitCountforDay),$($tDate.Year.ToString('0000'))$($tDate.Month.ToString('00')),$($tDate.ToString('d'))"
+				$OutputString = "$($WebApp.Name),$($SiteColTitle),$($Scope),$($SiteTitle),$($SiteUrl),$($LastProcessingTime),$($TotalHits),$($TotalUniqueUsers),$($LastProcessingHits),$($LastProcessingUniqueUsers),$($CurrentDate),$($HitCountforMonth),$($HitCountforDay),$($tDate.Year.ToString('0000'))$($tDate.Month.ToString('00')),$($tDate.ToString('d')),$($size)"
 				$OutputString | Out-File $OutputFilepath -Append
 			}
 
@@ -133,6 +158,3 @@ function Get-SPPageViews
 		$Site.Dispose()
 	}
 }
-
-# Usage
-Get-SPPageViews -RootSiteUrl "http://roblab-03/compliance" -OutputFilepath "F:\pspageviews.csv" -IncludeSites -IncludeWebs -DeleteExistingFile
