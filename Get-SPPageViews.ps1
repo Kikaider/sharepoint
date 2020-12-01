@@ -1,4 +1,4 @@
-function Get-zSPPageViews
+function Get-SPPageViews
 {
     <#
     Usage: Get-SPPageViews -RootSiteUrl "http://hej.lab.roblab.com" -OutputFilepath "F:\pspageviews_$(Get-date -Format "yyyyMMddHHmm").csv" -IncludeSites -IncludeWebs -DeleteExistingFile
